@@ -1,0 +1,141 @@
+buildscript {
+    ext {
+        springBootVersion = "3.5.4"
+        dependencyManagementVersion = "1.1.7"
+        grpcSpringBootStarterVersion = "3.1.0.RELEASE"
+        grpcVersion = "1.74.0"
+        hypersistenceVersion = "3.10.3"
+        liquibaseVersion = "4.31.1"
+        preliquibaseVersion = "1.6.1"
+        logstashVersion = "8.1"
+        micrometerVersion = "1.15.3"
+        postgresVersion = "42.7.7"
+        protobufPluginVersion = "0.9.4"
+        protobufVersion = "4.29.3"
+        caffeineVersion = "3.2.2"
+    }
+}
+
+plugins {
+    id "java"
+    id "org.springframework.boot" version "$springBootVersion"
+    id "io.spring.dependency-management" version "$dependencyManagementVersion"
+    id "com.google.protobuf" version "$protobufPluginVersion"
+}
+
+group "im.home"
+version "1.0.0"
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+compileJava {
+    options.encoding = "UTF-8"
+}
+
+compileTestJava {
+    options.encoding = "UTF-8"
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    annotationProcessor "org.springframework.boot:spring-boot-configuration-processor"
+    annotationProcessor "org.projectlombok:lombok"
+
+    implementation "org.springframework.boot:spring-boot-starter-web"
+    implementation "org.springframework.boot:spring-boot-starter-data-jpa"
+    implementation "org.springframework.boot:spring-boot-starter-actuator"
+    implementation "org.springframework.boot:spring-boot-starter-graphql"
+    implementation "org.springframework.boot:spring-boot-starter-cache"
+    implementation "net.lbruun.springboot:preliquibase-spring-boot-starter:$preliquibaseVersion"
+
+    implementation "org.postgresql:postgresql:$postgresVersion"
+    implementation "org.liquibase:liquibase-core:$liquibaseVersion"
+    implementation "io.hypersistence:hypersistence-utils-hibernate-63:$hypersistenceVersion"
+    implementation "com.github.ben-manes.caffeine:caffeine:$caffeineVersion"
+
+    implementation "net.devh:grpc-server-spring-boot-starter:$grpcSpringBootStarterVersion"
+    implementation "net.devh:grpc-client-spring-boot-starter:$grpcSpringBootStarterVersion"
+    implementation "io.grpc:grpc-protobuf:$grpcVersion"
+    implementation "io.grpc:grpc-stub:$grpcVersion"
+    implementation "io.grpc:grpc-services:$grpcVersion"
+    implementation "com.google.protobuf:protobuf-java:$protobufVersion"
+    implementation "com.google.protobuf:protobuf-java-util:$protobufVersion"
+
+    implementation "org.projectlombok:lombok"
+    implementation "io.micrometer:micrometer-core:$micrometerVersion"
+    implementation "io.micrometer:micrometer-registry-prometheus:$micrometerVersion"
+    implementation "net.logstash.logback:logstash-logback-encoder:$logstashVersion"
+
+    testImplementation "org.springframework.boot:spring-boot-starter-test"
+    testImplementation "org.junit.platform:junit-platform-launcher"
+}
+
+sourceSets {
+    main {
+        proto {
+            srcDir "api/api-schema/proto"
+            srcDir "api/api-schema/include"
+            srcDir "api/private"
+        }
+    }
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:$protobufVersion"
+    }
+    plugins {
+        create("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion"
+        }
+    }
+    generateProtoTasks {
+        all().forEach {
+            task ->
+                task.plugins {
+                    create("grpc") {
+                        option("enable_deprecated=false")
+                    }
+                }
+        }
+    }
+}
+
+tasks.register("fixGeneratedAnnotations") {
+    dependsOn("generateProto")
+    doLast {
+        println("Fixing javax.annotation.Generated annotations...")
+        def genDir = "build/generated/source/proto"
+        if (!file(genDir).exists()) return
+        fileTree(dir: genDir, include: "**/*.java").each { file ->
+            def content = file.getText("UTF-8")
+            def updated = content.replace("javax.annotation.Generated", "jakarta.annotation.Generated")
+            if (updated != content) file.setText(updated, "UTF-8")
+        }
+        println("Annotation fix is successfully done!")
+    }
+}
+
+tasks.named("generateProto") {
+    finalizedBy("fixGeneratedAnnotations")
+}
+
+tasks.named("compileJava") {
+    dependsOn("fixGeneratedAnnotations")
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+tasks.test {
+    System.getProperties().forEach {
+        k,v ->        systemProperty(k as String, v)
+    }
+}
